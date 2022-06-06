@@ -1,0 +1,142 @@
+<html>
+<head>
+  <title>MissionControl</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <link href='https://fonts.googleapis.com/css?family=Roboto Mono' rel='stylesheet'>
+  <style>
+    body
+    {
+      font-family: 'Roboto Mono';
+      font-size: 12px;
+      color: green;
+      background-color: black;
+    }
+
+    .pane
+    {
+      height: 100%;
+      top: 0;
+      position: fixed;
+      margin: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+
+    .action_bar
+    {
+      width: 15%;
+      left: 0;
+    }
+
+    .console
+    {
+      width: 84%;
+      right: 0;
+    }
+    
+    .action_button
+    {
+      margin: 5px;
+      padding: 10px;
+      font-size: 15px;
+      border-style: solid;
+      border-width: 2px;
+    }
+    
+    .action_button:hover
+    {
+      border-color: lightgreen;
+    }
+    
+    .action_button:active
+    {
+      border-color: darkgreen;
+    }
+  </style>
+  <script src="client_config.js?cache_buster=f8OHfi7Fsyve"></script>
+  <script src="mc_client.js?cache_buster=f8OHfi7Fsyve"></script>
+  <script>
+    var write_console = function(msg)
+    {
+      var console = document.querySelector('.console');
+      console.innerText += msg + '\n';
+      console.scrollTop = console.scrollHeight;
+    }
+
+    var update_action_bar = function(actions)
+    {
+      var action_bar = document.querySelector('.action_bar');
+      action_bar.innerHTML = '<div class="action_button" onclick="query_jobs()">Refresh Jobs</div>';
+      action_bar.innerHTML += '<div class="action_button" onclick="running_jobs()">List Running Jobs</div>';
+      for (action of actions)
+      {
+        action_bar.innerHTML += '<div class="action_button" onclick="do_action(event)">' + action + '</div>';
+      }
+    }
+
+    var handle_message = function(message)
+    {
+      if (message.action == 'updatejobs')
+      {
+        update_action_bar(message.jobs);
+        if (window.REWAKE_IVL)
+        {
+          clearInterval(window.REWAKE_IVL);
+          window.REWAKE_IVL = null;
+        }
+        write_console('Updated action bar. Please select an action from the action bar.');
+      }
+      else if (message.action == 'output' && (typeof message.text) == 'string')
+      {
+        write_console(message.text);
+      }
+      else
+      {
+        write_console('Got unhandalable message: '+JSON.stringify(message));
+      }
+    };
+
+    var query_jobs = function()
+    {
+      write_console('Waking server and querying jobs...');
+      mc_send_message({'action':'queryjobs'});
+      if (!window.REWAKE_IVL)
+      {
+        window.REWAKE_IVL = setInterval(function(){
+          write_console('Re-sending wake signal...');
+          mc_wake_server();
+        }, MC_WAKE_TIMEOUT);
+      }
+      mc_wake_server();
+    }
+
+    var running_jobs = function()
+    {
+      write_console('Checking running jobs...'); 
+      mc_send_message({'action':'runningjobs'});
+    }
+
+    var do_action = function(evt)
+    {
+      var name = evt.target.innerText;
+      mc_send_message({'action': 'runjob', 'jobname': name});
+      write_console('Requested ' + name + ' to run');
+    }
+
+    window.onload = function()
+    {
+      update_action_bar([]);
+
+      write_console('Your CLIENT_ID is ' + MC_CLIENT_ID);
+      write_console('Initializing inbox loop...');
+      mc_check_inbox_loop(handle_message);
+
+      query_jobs();
+    };
+  </script>
+</head>
+<body>
+  <div class='pane action_bar'></div>
+  <div class='pane console'></div>
+</body>
+</html>
