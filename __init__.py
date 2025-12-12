@@ -131,9 +131,6 @@ def handle_message(message):
   action = message.get('action')
   sender = message.get('from')
 
-  #logger.info('GOTMAIL:'+json.dumps(message))
-  #return
-
   if not sender:
     return
   if action == 'queryjobs':
