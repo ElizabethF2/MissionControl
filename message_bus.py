@@ -1,15 +1,33 @@
-# A simple message bus
+# A simple, RESTful message bus
 # If USE_MULTITHREADING is true, long polling will be enabled
-# When deploying, ensure only a single instance is running and that the same instance will be used accross multiple requests
+# When deploying, ensure only a single instance is running and
+# that the same instance will be used across multiple requests
 
 import sys, os, json, threading, http.server, socketserver, urllib.parse
 
-PORT = int(os.environ.get('PORT', 80))
-USE_MULTITHREADING = int(os.environ.get('USE_MULTITHREADING', 1))
-WAIT_TIMEOUT = float(os.environ.get('WAIT_TIMEOUT', 28))
-MAGIC_RECIPIENTS = json.loads(os.environ.get('MAGIC_RECIPIENTS', '{}'))
-MAX_SIZE = int(os.environ.get('MAX_SIZE', 150*1024*1024))
-CHECK_SIZE = int(os.environ.get('CHECK_SIZE', 0))
+def _load_config():
+  config_defaults = {
+    'port': (int, 80),
+    'use_multithreading': (int, 1),
+    'wait_timeout': (float, 28),
+    'magic_recipients': (json.loads, '{}'),
+    'max_size': (int, 150*1024*1024),
+    'check_size': (int, 0),
+    'certfile': (lambda i: i, None),
+    'keyfile': (lambda i: i, None),
+  }
+  config = {
+    name: d[0](os.environ.get(name.upper(), d[1]))
+    for name, d in config_defaults.items()
+  }
+  if config_path := os.environ.get('MCBUS_CONFIG'):
+    with open(config_path, 'r') as f:
+      config |= json.load(f)
+  for k, v in config.items():
+    globals()[k.upper()] = v
+
+_load_config()
+del _load_config()
 
 LOCK = threading.Lock()
 INBOXES = {}
@@ -39,11 +57,13 @@ def get_or_create_inbox_event(name):
 
 class RequestHandler(http.server.BaseHTTPRequestHandler):
   def respond(self, result):
+    resp = json.dumps(result).encode()
     self.send_response(200)
-    self.send_header('Content-type', 'application/json')
+    self.send_header('Content-Type', 'application/json')
+    self.send_header('Content-Length', str(len(resp)))
     self.send_header('Access-Control-Allow-Origin', '*')
     self.end_headers()
-    self.wfile.write(json.dumps(result).encode())
+    self.wfile.write(resp)
 
   # Handle CORS preflight
   def do_OPTIONS(self):
@@ -53,10 +73,13 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
     self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
     self.end_headers()
 
-  # Get message
+  # Get message(s)
   def do_GET(self):
     result = []
-    qs = {k:v[0] for k,v in urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).items()}
+    qs = {
+      k:v[0] for k,v in
+      urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).items()
+    }
     name = qs.get('name')
     if name:
       if USE_MULTITHREADING:
@@ -69,7 +92,7 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
           result = INBOXES.pop(name)
     self.respond(result)
 
-  # Send message
+  # Send a message
   def do_POST(self):
     try:
       content_len = int(self.headers.get('content-length', 0))
@@ -91,7 +114,17 @@ class MultiThreadedServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
   daemon_thread = True
 
 def main():
-  httpd = MultiThreadedServer(('',PORT), RequestHandler)
+  if USE_MULTITHREADING:
+    httpd = MultiThreadedServer(('', PORT), RequestHandler)
+  else:
+    httpd = http.server.HTTPServer(('', PORT), RequestHandler)
+
+  if CERTFILE:
+    import ssl
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(CERTFILE, keyfile = KEYFILE)
+    httpd.socket = context.wrap_socket(httpd.socket, server_side = True)
+
   httpd.serve_forever()
 
 if __name__ == '__main__':

@@ -3,7 +3,10 @@ import api_backend
 
 # TODO: Add a config var to poll the bus and sleep w/ a backoff that can be enabled for message buses run w/ USE_MULTITHREADING set to false
 
-NETWORK_ERRORS = (ConnectionError, json.decoder.JSONDecodeError, requests.exceptions.ConnectionError)
+NETWORK_ERRORS = (ConnectionError,
+                  json.decoder.JSONDecodeError,
+                  requests.exceptions.ConnectionError,
+                  requests.exceptions.ChunkedEncodingError)
 
 LOCK = threading.Lock()
 running_jobs = []
@@ -55,7 +58,6 @@ def start_job(sender, name, payload):
       if job_config.get('singleton', True) and any((job['name'] == name for job in running_jobs)):
         send_message({'recipient': sender, 'action': 'output', 'text': 'A ' + name + ' job is already running.'})
         return
-      print('MISSIONCONTROLDBG start', command)
       job['proc'] = subprocess.Popen(command,
                                      env=env,
                                      stdin = subprocess.DEVNULL,
@@ -116,7 +118,7 @@ def proxied_request_worker(message):
     sp = request.path.split('/')
     if len(sp) > 1:
       name = sp[1]
-      if name in config['PROXIALE_EXTENSIONS']:
+      if name in config['PROXIABLE_EXTENSIONS']:
         api_backend._connection_route(request)
 
 def send_message(message):
@@ -162,7 +164,6 @@ def handle_messages_until_idle():
     except NETWORK_ERRORS:
       continue
     for message in inbox:
-      print('MISSIONCONTROLDBG message', message)
       handle_message(message)
       last_message_time = time.time()
     if (time.time() - last_message_time) > config['IDLE_TIMEOUT']:
@@ -173,21 +174,18 @@ def inbox_reader():
     try:
       if config.get('USE_WAKER', True):
         try:
-          print('MISSIONCONTROLDBG before waker')
-          signaled = requests.get(config['WAKER_URL']+'?wait=1').json()
-          print('MISSIONCONTROLDBG after waker')
+          try:
+            signaled = requests.get(config['WAKER_URL']+'?wait=1', timeout=config['WAKER_TIMEOUT']).json()
+          except requests.exceptions.Timeout:
+            signaled = False
         except NETWORK_ERRORS as err:
-          print('MISSIONCONTROLDBG neterror', repr(err))
           time.sleep(20)
           continue
       else:
         signaled = True
       if signaled:
-        print('MISSIONCONTROLDBG before handlemessages')
         handle_messages_until_idle()
-        print('MISSIONCONTROLDBG after handlemessages')
     except Exception as exc:
-      print('MISSIONCONTROLDBG', repr(exc))
-      breakpoint()
+      return
 
 threading.Thread(target=inbox_reader, daemon=True).start()
