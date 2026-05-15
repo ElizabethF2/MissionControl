@@ -27,21 +27,19 @@ def _load_config():
     globals()[k.upper()] = v
 
 _load_config()
-del _load_config()
+del _load_config
 
 LOCK = threading.Lock()
 INBOXES = {}
 INBOX_EVENTS = {}
 
 def get_size(obj):
-  size = 0
   if type(obj) is dict:
-    size += sum((get_size(k) + get_size(v) for k,v in obj.items()))
+    return sum((get_size(k) + get_size(v) for k,v in obj.items()))
   elif type(obj) is list:
-    size += sum(map(get_size, obj))
+    return sum(map(get_size, obj))
   else:
     return sys.getsizeof(obj)
-  return size
 
 def ensure_inboxes_under_max_size_with_lock():
   if CHECK_SIZE and (get_size(INBOXES) + get_size(INBOX_EVENTS)) > MAX_SIZE:
@@ -84,7 +82,7 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
     if name:
       if USE_MULTITHREADING:
         event = get_or_create_inbox_event(name)
-        event.wait(timeout=WAIT_TIMEOUT)
+        event.wait(timeout = WAIT_TIMEOUT)
         event.clear()
       with LOCK:
         ensure_inboxes_under_max_size_with_lock()
